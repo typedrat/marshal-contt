@@ -50,6 +50,8 @@ import           Control.Exception     ( bracket )
 import           Control.Lens.Fold
 import           Control.Lens.Getter
 import           Control.Lens.Indexed
+-- For documentation:
+import           Control.Lens.Type     ( IndexedTraversal, IndexedLens )
 import           Control.Monad.Cont
 import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Short as SBS
@@ -65,7 +67,7 @@ import           Foreign.Marshal.Utils ( fillBytes )
 import           Foreign.Ptr
 import           Foreign.Storable
 
--- | 'alloca' is a continuation that provides access to a pointer into a
+-- | 'alloca' @\@a@ is a continuation that provides access to a pointer into a
 --   temporary block of memory sufficient to hold values of type @a@.
 alloca :: Storable a => ContT r IO (Ptr a)
 alloca = ContT C.alloca
@@ -82,14 +84,14 @@ allocaWith val = do
 -- | 'allocaBytes' @n@ is a continuation that provides access to a pointer into
 --   a temporary block of memory sufficient to hold @n@ bytes, with
 --   machine-standard alignment.
-allocaBytes :: Int -> ContT r IO (Ptr a)
+allocaBytes :: forall a r. Int -> ContT r IO (Ptr a)
 allocaBytes size = ContT $ C.allocaBytes size
 {-# INLINE allocaBytes #-}
 
 -- | 'allocaBytesAligned' @n@ @a@ is a continuation that provides access to a
 --   pointer into a temporary block of memory sufficient to hold @n@ bytes, 
 --   with @a@-byte alignment.
-allocaBytesAligned :: Int -> Int -> ContT r IO (Ptr a)
+allocaBytesAligned :: forall a r. Int -> Int -> ContT r IO (Ptr a)
 allocaBytesAligned size align = ContT $ C.allocaBytesAligned size align
 {-# INLINE allocaBytesAligned #-}
 
@@ -105,7 +107,7 @@ bracketContT init' final = withContT $ \f a ->
 
 --
 
--- | 'calloc' is a continuation that provides access to a pointer into a
+-- | 'calloc' @\@a@ is a continuation that provides access to a pointer into a
 --   temporary block of zeroed memory sufficient to hold values of type @a@.
 calloc :: forall a r. Storable a => ContT r IO (Ptr a)
 calloc = do
@@ -118,7 +120,7 @@ calloc = do
 -- | 'callocBytes' @n@ is a continuation that provides access to a pointer into
 --   a temporary block of zeroed memory sufficient to hold @n@ bytes, with
 --   machine-standard alignment.
-callocBytes :: Int -> ContT r IO (Ptr a)
+callocBytes :: forall a r. Int -> ContT r IO (Ptr a)
 callocBytes size = do
     ptr <- allocaBytes size
     liftIO $ fillBytes ptr 0 size
@@ -140,7 +142,7 @@ allocaArrayWith :: (Foldable f, Storable a) => f a -> ContT r IO (Ptr a)
 allocaArrayWith = allocaArrayWith' return
 {-# INLINE allocaArrayWith #-}
 
--- Why isn't this defined as `allocaArrayWithOf' traversed`? I don't want to
+-- Why isn't this defined as `allocaArrayWithOf' folded`? I don't want to
 -- lose the potential performance benefits of a specialized `length`.
 allocaArrayWith' :: (Foldable f, Storable b) 
                  => (a -> ContT r IO b) 
@@ -247,8 +249,8 @@ allocaArrayWith0' f xs end = do
 
 -- | 'allocaArrayWith0Of' @t@ works in the same way as 'allocaArrayWith0', but
 --   using the 'Fold' @t@ rather than any 'Foldable' instance.
-allocaArrayWith0Of :: (Storable a) => Fold s a -> s -> ContT r IO (Ptr a)
-allocaArrayWith0Of fold = allocaArrayWithOf' fold return 
+allocaArrayWith0Of :: (Storable a) => Fold s a -> s -> a -> ContT r IO (Ptr a)
+allocaArrayWith0Of fold = allocaArrayWith0Of' fold return 
 {-# INLINE allocaArrayWith0Of #-}
 
 allocaArrayWith0Of' :: (Storable b) 
