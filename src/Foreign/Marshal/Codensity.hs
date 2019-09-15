@@ -1,6 +1,6 @@
 {-|
-Module      : Foreign.Marshal.ContT
-Description : A ContT-based wrapper for Haskell-to-C marshalling functions.
+Module      : Foreign.Marshal.Codensity
+Description : A Codensity-based wrapper for Haskell-to-C marshalling functions.
 Copyright   : (c) Alexis Williams, 2019
 License     : MPL-2.0
 Maintainer  : alexis@typedr.at
@@ -9,9 +9,10 @@ Portability : portable
 
 This library wraps the standard @base@ bracketed allocation primitives (along
 with those from "Data.ByteString" and "Data.ByteString.Short") in a
-'ContT'-based interface to ease the chaining of complex marshalling operations.
+'Codensity'-based interface to ease the chaining of complex marshalling
+operations.
 -}
-module Foreign.Marshal.ContT 
+module Foreign.Marshal.Codensity
     (
     -- * @alloca@
       alloca, allocaWith, allocaBytes, allocaBytesAligned
@@ -24,7 +25,7 @@ module Foreign.Marshal.ContT
     , callocArray, callocArray0
     -- * @withForeignPtr@ (and alternatives)
     , withForeignPtr
-    , bracketContT
+    , bracketCodensity
     -- * @ToCString@
     , ToCString(..)
     -- * Reexports
@@ -46,13 +47,14 @@ module Foreign.Marshal.ContT
     , iallocaArrayWith0', iallocaArrayWith0Of'
     ) where
 
-import           Control.Exception     ( bracket )
+import           Control.Exception     ( finally )
 import           Control.Lens.Fold
 import           Control.Lens.Getter
 import           Control.Lens.Indexed
 -- For documentation:
 import           Control.Lens.Type     ( IndexedTraversal, IndexedLens )
-import           Control.Monad.Cont
+import           Control.Monad.Codensity
+import           Control.Monad.IO.Class
 import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Short as SBS
 import           Data.Foldable         ( foldrM )
@@ -69,13 +71,13 @@ import           Foreign.Storable
 
 -- | 'alloca' @\@a@ is a continuation that provides access to a pointer into a
 --   temporary block of memory sufficient to hold values of type @a@.
-alloca :: Storable a => ContT r IO (Ptr a)
-alloca = ContT C.alloca
+alloca :: Storable a => Codensity IO (Ptr a)
+alloca = Codensity C.alloca
 {-# INLINE alloca #-}
 
 -- | 'allocaWith' @a@ is a continuation that provides access to a pointer into
 --   a temporary block of memory containing @a@.
-allocaWith :: Storable a => a -> ContT r IO (Ptr a)
+allocaWith :: Storable a => a -> Codensity IO (Ptr a)
 allocaWith val = do
     ptr <- alloca
     liftIO $ poke ptr val
@@ -85,33 +87,36 @@ allocaWith val = do
 -- | 'allocaBytes' @n@ is a continuation that provides access to a pointer into
 --   a temporary block of memory sufficient to hold @n@ bytes, with
 --   machine-standard alignment.
-allocaBytes :: forall a r. Int -> ContT r IO (Ptr a)
-allocaBytes size = ContT $ C.allocaBytes size
+allocaBytes :: Int -> Codensity IO (Ptr a)
+allocaBytes size = Codensity $ C.allocaBytes size
 {-# INLINE allocaBytes #-}
 
 -- | 'allocaBytesAligned' @n@ @a@ is a continuation that provides access to a
 --   pointer into a temporary block of memory sufficient to hold @n@ bytes, 
 --   with @a@-byte alignment.
-allocaBytesAligned :: forall a r. Int -> Int -> ContT r IO (Ptr a)
-allocaBytesAligned size align = ContT $ C.allocaBytesAligned size align
+allocaBytesAligned :: Int -> Int -> Codensity IO (Ptr a)
+allocaBytesAligned size align = Codensity $ C.allocaBytesAligned size align
 {-# INLINE allocaBytesAligned #-}
 
--- | 'bracketContT' allows one to add initialization and finalization hooks to
---   an existing 'ContT' that will be executed even in cases where an exception
+-- | 'bracketCodensity' allows one to add initialization and finalization hooks to
+--   an existing 'Codensity' that will be executed even in cases where an exception
 --   occurs.
 --
 --   This provides an alternative to 'ForeignPtr's when the pointer will only
 --   be used in code that is written with this library in mind.
-bracketContT :: (a -> IO b) -> (a -> IO c) -> ContT r IO a -> ContT r IO a
-bracketContT init' final = withContT $ \f a ->
-    bracket (init' a $> a) final f
-{-# INLINE bracketContT #-}
+bracketCodensity :: (a -> IO b) -> (a -> IO c) -> Codensity IO a -> Codensity IO a
+bracketCodensity init' final m = do
+    a <- m
+    liftIO $ init' a
+    wrapCodensity (`finally` final a)
+    return a
+{-# INLINE bracketCodensity #-}
 
 --
 
 -- | 'calloc' @\@a@ is a continuation that provides access to a pointer into a
 --   temporary block of zeroed memory sufficient to hold values of type @a@.
-calloc :: forall a r. Storable a => ContT r IO (Ptr a)
+calloc :: forall a. Storable a => Codensity IO (Ptr a)
 calloc = do
     ptr <- alloca
     let size = sizeOf (undefined :: a)
@@ -122,7 +127,7 @@ calloc = do
 -- | 'callocBytes' @n@ is a continuation that provides access to a pointer into
 --   a temporary block of zeroed memory sufficient to hold @n@ bytes, with
 --   machine-standard alignment.
-callocBytes :: forall a r. Int -> ContT r IO (Ptr a)
+callocBytes :: Int -> Codensity IO (Ptr a)
 callocBytes size = do
     ptr <- allocaBytes size
     liftIO $ fillBytes ptr 0 size
@@ -134,21 +139,21 @@ callocBytes size = do
 -- | 'allocaArray' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of memory sufficient to hold @n@ values of
 --   type @a@.
-allocaArray :: Storable a => Int -> ContT r IO (Ptr a)
-allocaArray = ContT . C.allocaArray
+allocaArray :: Storable a => Int -> Codensity IO (Ptr a)
+allocaArray size = Codensity (C.allocaArray size)
 {-# INLINE allocaArray #-}
 
 -- | 'allocaArrayWith' @xs@ is a continuation that provides access to a
 --   pointer into a temporary block of memory containing the values of @xs@.
-allocaArrayWith :: (Foldable f, Storable a) => f a -> ContT r IO (Ptr a)
+allocaArrayWith :: (Foldable f, Storable a) => f a -> Codensity IO (Ptr a)
 allocaArrayWith = allocaArrayWith' return
 {-# INLINE allocaArrayWith #-}
 
 -- Why isn't this defined as `allocaArrayWithOf' folded`? I don't want to
 -- lose the potential performance benefits of a specialized `length`.
 allocaArrayWith' :: (Foldable f, Storable b) 
-                 => (a -> ContT r IO b) 
-                 -> f a -> ContT r IO (Ptr b)
+                 => (a -> Codensity IO b) 
+                 -> f a -> Codensity IO (Ptr b)
 allocaArrayWith' f xs = do
     ptr <- allocaArray (length xs)
     _ <- foldrM go ptr xs
@@ -162,14 +167,14 @@ allocaArrayWith' f xs = do
 
 -- | 'allocaArrayWithOf' @f@ works in the same way as 'allocaArrayWith', but
 --   using the 'Fold' @f@ rather than any 'Foldable' instance.
-allocaArrayWithOf :: (Storable a) => Fold s a -> s -> ContT r IO (Ptr a)
+allocaArrayWithOf :: (Storable a) => Fold s a -> s -> Codensity IO (Ptr a)
 allocaArrayWithOf fold = allocaArrayWithOf' fold return 
 {-# INLINE allocaArrayWithOf #-}
 
 allocaArrayWithOf' :: (Storable b) 
                    => Fold s a
-                   -> (a -> ContT r IO b) 
-                   -> s -> ContT r IO (Ptr b)
+                   -> (a -> Codensity IO b) 
+                   -> s -> Codensity IO (Ptr b)
 allocaArrayWithOf' fold f xs = do
     ptr <- allocaArray (lengthOf fold xs)
     _ <- foldrMOf fold go ptr xs
@@ -182,8 +187,8 @@ allocaArrayWithOf' fold f xs = do
 {-# INLINE allocaArrayWithOf' #-}
 
 iallocaArrayWith' :: (FoldableWithIndex i f, Storable b)
-                  => (i -> a -> ContT r IO b)
-                  -> f a -> ContT r IO (Ptr b)
+                  => (i -> a -> Codensity IO b)
+                  -> f a -> Codensity IO (Ptr b)
 iallocaArrayWith' f xs = do
     ptr <- allocaArray (length xs)
     _ <- ifoldrMOf ifolded go ptr xs
@@ -204,8 +209,8 @@ type AnIndexedFold i s a = forall m p. (Indexable i p)
 
 iallocaArrayWithOf' :: (Storable b) 
                     => AnIndexedFold i s a
-                    -> (i -> a -> ContT r IO b)
-                    -> s -> ContT r IO (Ptr b)
+                    -> (i -> a -> Codensity IO b)
+                    -> s -> Codensity IO (Ptr b)
 iallocaArrayWithOf' fold f xs = do
     ptr <- allocaArray (lengthOf fold xs)
     _ <- ifoldrMOf fold go ptr xs
@@ -222,21 +227,21 @@ iallocaArrayWithOf' fold f xs = do
 -- | 'allocaArray0' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of memory sufficient to hold @n@ values of
 --   type @a@, along with a final terminal element.
-allocaArray0 :: Storable a => Int -> ContT r IO (Ptr a)
-allocaArray0 = ContT . C.allocaArray0
+allocaArray0 :: Storable a => Int -> Codensity IO (Ptr a)
+allocaArray0 len = Codensity (C.allocaArray0 len)
 {-# INLINE allocaArray0 #-}
 
 -- | 'allocaArrayWith0' @xs@ @end@ is a continuation that provides access to a
 --   pointer into a temporary block of memory containing the values of @xs@,
 --   terminated with @end@.
 allocaArrayWith0 :: (Foldable f, Storable a) 
-                 => f a -> a -> ContT r IO (Ptr a)
+                 => f a -> a -> Codensity IO (Ptr a)
 allocaArrayWith0 = allocaArrayWith0' return
 {-# INLINE allocaArrayWith0 #-}
 
 allocaArrayWith0' :: (Foldable f, Storable b)
-                  => (a -> ContT r IO b)
-                  -> f a -> b -> ContT r IO (Ptr b)
+                  => (a -> Codensity IO b)
+                  -> f a -> b -> Codensity IO (Ptr b)
 allocaArrayWith0' f xs end = do
     ptr <- allocaArray (length xs)
     endPtr <- foldrMOf folded go ptr xs
@@ -251,14 +256,14 @@ allocaArrayWith0' f xs end = do
 
 -- | 'allocaArrayWith0Of' @t@ works in the same way as 'allocaArrayWith0', but
 --   using the 'Fold' @t@ rather than any 'Foldable' instance.
-allocaArrayWith0Of :: (Storable a) => Fold s a -> s -> a -> ContT r IO (Ptr a)
+allocaArrayWith0Of :: (Storable a) => Fold s a -> s -> a -> Codensity IO (Ptr a)
 allocaArrayWith0Of fold = allocaArrayWith0Of' fold return 
 {-# INLINE allocaArrayWith0Of #-}
 
 allocaArrayWith0Of' :: (Storable b) 
                     => Fold s a
-                    -> (a -> ContT r IO b) 
-                    -> s -> b -> ContT r IO (Ptr b)
+                    -> (a -> Codensity IO b) 
+                    -> s -> b -> Codensity IO (Ptr b)
 allocaArrayWith0Of' fold f xs end = do
     ptr <- allocaArray (lengthOf fold xs)
     endPtr <- foldrMOf fold go ptr xs
@@ -272,8 +277,8 @@ allocaArrayWith0Of' fold f xs end = do
 {-# INLINE allocaArrayWith0Of' #-}
 
 iallocaArrayWith0' :: (FoldableWithIndex i f, Storable b)
-                   => (i -> a -> ContT r IO b)
-                   -> f a -> b -> ContT r IO (Ptr b)
+                   => (i -> a -> Codensity IO b)
+                   -> f a -> b -> Codensity IO (Ptr b)
 iallocaArrayWith0' f xs end = do
     ptr <- allocaArray (length xs)
     endPtr <- ifoldrMOf ifolded go ptr xs
@@ -288,8 +293,8 @@ iallocaArrayWith0' f xs end = do
 
 iallocaArrayWith0Of' :: (Storable b)
                      => AnIndexedFold i s a
-                     -> (i -> a -> ContT r IO b)
-                     -> s -> b -> ContT r IO (Ptr b)
+                     -> (i -> a -> Codensity IO b)
+                     -> s -> b -> Codensity IO (Ptr b)
 iallocaArrayWith0Of' fold f xs end = do
     ptr <- allocaArray (lengthOf fold xs)
     endPtr <- ifoldrMOf fold go ptr xs
@@ -307,7 +312,7 @@ iallocaArrayWith0Of' fold f xs end = do
 -- | 'callocArray0' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of zeroed memory sufficient to hold @n@
 --   values of type @a@.
-callocArray :: forall a r . Storable a => Int -> ContT r IO (Ptr a)
+callocArray :: forall a . Storable a => Int -> Codensity IO (Ptr a)
 callocArray len = do
     ptr <- allocaArray len
     let size = sizeOf (undefined :: a)
@@ -318,7 +323,7 @@ callocArray len = do
 -- | 'callocArray0' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of zeroed memory sufficient to hold @n@
 --   values of type @a@, along with a final terminal element.
-callocArray0 :: forall a r . Storable a => Int -> ContT r IO (Ptr a)
+callocArray0 :: forall a . Storable a => Int -> Codensity IO (Ptr a)
 callocArray0 len = do
     ptr <- allocaArray0 len
     let size = sizeOf (undefined :: a)
@@ -330,8 +335,8 @@ callocArray0 len = do
 
 -- | 'withForeignPtr' @ptr@ is a continuation that provides safe access to the
 --   backing pointer of @ptr@.
-withForeignPtr :: ForeignPtr a -> ContT r IO (Ptr a)
-withForeignPtr = ContT . C.withForeignPtr
+withForeignPtr :: ForeignPtr a -> Codensity IO (Ptr a)
+withForeignPtr ptr = Codensity (C.withForeignPtr ptr)
 {-# INLINE withForeignPtr #-}
 
 --
@@ -341,28 +346,28 @@ withForeignPtr = ContT . C.withForeignPtr
 class ToCString a where
     -- | 'withCString' @a@ is a continuation that provides access to @a@ as a
     --   'CString'.
-    withCString    :: a -> ContT r IO CString
+    withCString    :: a -> Codensity IO CString
     -- | 'withCStringLen' @a@ is a continuation that provides access to @a@ as a
     --   'CStringLen'.
-    withCStringLen :: a -> ContT r IO CStringLen
+    withCStringLen :: a -> Codensity IO CStringLen
 
 instance ToCString String where
-    withCString    = ContT . C.withCString
+    withCString s    = Codensity (C.withCString s)
     {-# INLINE withCString #-}
     
-    withCStringLen = ContT . C.withCStringLen
+    withCStringLen s = Codensity (C.withCStringLen s)
     {-# INLINE withCStringLen #-}
 
 instance ToCString BS.ByteString where
-    withCString    = ContT . BS.useAsCString
+    withCString s    = Codensity (BS.useAsCString s)
     {-# INLINE withCString #-}
 
-    withCStringLen = ContT . BS.useAsCStringLen
+    withCStringLen s = Codensity (BS.useAsCStringLen s)
     {-# INLINE withCStringLen #-}
 
 instance ToCString SBS.ShortByteString where
-    withCString    = ContT . SBS.useAsCString
+    withCString    s = Codensity (SBS.useAsCString s)
     {-# INLINE withCString #-}
 
-    withCStringLen = ContT . SBS.useAsCStringLen
+    withCStringLen s = Codensity (SBS.useAsCStringLen s)
     {-# INLINE withCStringLen #-}
