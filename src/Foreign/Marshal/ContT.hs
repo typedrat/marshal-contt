@@ -12,7 +12,7 @@ with those from "Data.ByteString" and "Data.ByteString.Short") in a
 'ContT'-based interface to ease the chaining of complex marshalling operations.
 -}
 module Foreign.Marshal.ContT 
-    ( 
+    (
     -- * @alloca@
       alloca, allocaWith, allocaBytes, allocaBytesAligned
     -- * @calloc@
@@ -22,10 +22,14 @@ module Foreign.Marshal.ContT
     , allocaArray0, allocaArrayWith0, allocaArrayWith0Of
     -- * @callocArray@
     , callocArray, callocArray0
-    -- * @withForeignPtr@
+    -- * @withForeignPtr@ (and alternatives)
     , withForeignPtr
+    , bracketContT
     -- * @ToCString@
     , ToCString(..)
+    -- * Reexports
+    , CString, CStringLen
+    , Ptr, nullPtr
     -- * Projected variants
     -- | These variants work in the same way as their corresponding functions
     --   without the terminal prime, but with a function argument that projects
@@ -42,14 +46,15 @@ module Foreign.Marshal.ContT
     , iallocaArrayWith0', iallocaArrayWith0Of'
     ) where
 
+import           Control.Exception     ( bracket )
 import           Control.Lens.Fold
 import           Control.Lens.Getter
 import           Control.Lens.Indexed
--- import           Control.Lens.Traversal
 import           Control.Monad.Cont
-import qualified Data.ByteString       as BS 
-import qualified Data.ByteString.Short as SBS 
+import qualified Data.ByteString       as BS
+import qualified Data.ByteString.Short as SBS
 import           Data.Foldable         ( foldrM )
+import           Data.Functor          ( ($>) )
 import qualified Foreign.C.String      as C
 import           Foreign.C.String      ( CString, CStringLen )
 import qualified Foreign.ForeignPtr    as C
@@ -87,6 +92,16 @@ allocaBytes size = ContT $ C.allocaBytes size
 allocaBytesAligned :: Int -> Int -> ContT r IO (Ptr a)
 allocaBytesAligned size align = ContT $ C.allocaBytesAligned size align
 {-# INLINE allocaBytesAligned #-}
+
+-- | 'bracketContT' allows one to add initialization and finalization hooks to
+--   an existing 'ContT' that will be executed even in cases where an exception
+--   occurs.
+--
+--   This provides an alternative to 'ForeignPtr's when the pointer will only
+--   be used in code that is written with this library in mind.
+bracketContT :: (a -> IO b) -> (a -> IO c) -> ContT r IO a -> ContT r IO a
+bracketContT init' final = withContT $ \f a ->
+    bracket (init' a $> a) final f
 
 --
 
@@ -177,7 +192,8 @@ iallocaArrayWith' f xs = do
 {-# INLINE iallocaArrayWith' #-}
 
 -- | A generic 'IndexedFold' or equivalent, taking an 'IndexedGetter',
---   'IndexedFold' (obviously), 'IndexedTraversal', or 'IndexedLens'.
+--   'IndexedFold' (obviously), 'Control.Lens.Type.IndexedTraversal', or
+--   'Control.Lens.Type.IndexedLens'.
 type AnIndexedFold i s a = forall m p. (Indexable i p)
                         => p a (Const m a) 
                         -> s -> Const m s

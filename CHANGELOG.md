@@ -4,6 +4,8 @@
 
 * Reimplement `calloc` and friends in terms of `alloca` to make them 
   exception-safe.
+* Add `bracketContT` to add initialization and finalization hooks to an 
+  existing `ContT`.
 
 ## 0.1.1.0 -- 2019-09-14
 
