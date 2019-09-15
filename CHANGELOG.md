@@ -1,5 +1,10 @@
 # Revision history for marshal-contt
 
+## 0.2.0.0 -- 2019-09-15
+
+* Add new `Foreign.Marshal.Codensity` module to expose an equivalent interface
+  in terms of a different monadic abstraction for continuation-based code.
+
 ## 0.1.2.1 -- 2019-09-14
 
 * Fix documentation bugs.

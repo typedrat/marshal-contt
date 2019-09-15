@@ -31,6 +31,8 @@ module Foreign.Marshal.Codensity
     -- * Reexports
     , CString, CStringLen
     , Ptr, nullPtr
+    , Codensity(..)
+    , lowerCodensity
     -- * Projected variants
     -- | These variants work in the same way as their corresponding functions
     --   without the terminal prime, but with a function argument that projects
@@ -309,7 +311,7 @@ iallocaArrayWith0Of' fold f xs end = do
 
 --
 
--- | 'callocArray0' @\@a@ @n@ is a continuation that provides access to a
+-- | 'callocArray' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of zeroed memory sufficient to hold @n@
 --   values of type @a@.
 callocArray :: forall a . Storable a => Int -> Codensity IO (Ptr a)

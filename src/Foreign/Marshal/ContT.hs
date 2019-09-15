@@ -30,6 +30,8 @@ module Foreign.Marshal.ContT
     -- * Reexports
     , CString, CStringLen
     , Ptr, nullPtr
+    , ContT(..)
+    , lowerContT
     -- * Projected variants
     -- | These variants work in the same way as their corresponding functions
     --   without the terminal prime, but with a function argument that projects
@@ -66,6 +68,10 @@ import qualified Foreign.Marshal.Array as C
 import           Foreign.Marshal.Utils ( fillBytes )
 import           Foreign.Ptr
 import           Foreign.Storable
+
+-- | Lower a 'ContT' into a computation in the base monad.
+lowerContT :: (Monad m) => ContT a m a -> m a
+lowerContT (ContT f) = f return
 
 -- | 'alloca' @\@a@ is a continuation that provides access to a pointer into a
 --   temporary block of memory sufficient to hold values of type @a@.
@@ -304,10 +310,10 @@ iallocaArrayWith0Of' fold f xs end = do
 
 --
 
--- | 'callocArray0' @\@a@ @n@ is a continuation that provides access to a
+-- | 'callocArray' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of zeroed memory sufficient to hold @n@
 --   values of type @a@.
-callocArray :: forall a r . Storable a => Int -> ContT r IO (Ptr a)
+callocArray :: forall a r. Storable a => Int -> ContT r IO (Ptr a)
 callocArray len = do
     ptr <- allocaArray len
     let size = sizeOf (undefined :: a)

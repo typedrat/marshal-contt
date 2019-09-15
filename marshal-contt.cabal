@@ -1,5 +1,5 @@
 name:                marshal-contt
-version:             0.1.2.1
+version:             0.2.0.0
 synopsis:            A ContT-based wrapper for Haskell-to-C marshalling functions.
 description:         See <https://github.com/typedrat/marshal-contt/blob/master/README.md>.
 homepage:            https://github.com/typedrat/marshal-contt
