@@ -18,22 +18,40 @@ module Foreign.Marshal.ContT
     -- * @calloc@
     , calloc, callocBytes
     -- * @allocaArray@
-    , allocaArray, allocaArrayWith, allocaArray0, allocaArrayWith0
+    , allocaArray, allocaArrayWith, allocaArrayWithOf
+    , allocaArray0, allocaArrayWith0, allocaArrayWith0Of
     -- * @callocArray@
     , callocArray, callocArray0
     -- * @withForeignPtr@
     , withForeignPtr
     -- * @ToCString@
     , ToCString(..)
+    -- * Projected variants
+    -- | These variants work in the same way as their corresponding functions
+    --   without the terminal prime, but with a function argument that projects
+    --   the results of the (possibly implicit) 'Fold' into a 'Storable' value.
+    --
+    --   As in the @lens@ library, the variants beginning with an @i@ use
+    --   'IndexedFold's rather than 'Fold's, and no versions without terminal
+    --   primes exist because there is no generic enough use for indexes to
+    --   give a sensible default.
+    , AnIndexedFold
+    , allocaArrayWith', allocaArrayWithOf'
+    , iallocaArrayWith', iallocaArrayWithOf'
+    , allocaArrayWith0', allocaArrayWith0Of'
+    , iallocaArrayWith0', iallocaArrayWith0Of'
     ) where
 
+import           Control.Lens.Fold
+import           Control.Lens.Getter
+import           Control.Lens.Indexed
+-- import           Control.Lens.Traversal
 import           Control.Monad.Cont
-import           Control.Monad.IO.Class
 import qualified Data.ByteString       as BS 
 import qualified Data.ByteString.Short as SBS 
-import           Data.Foldable
-import           Foreign.C.String      ( CString, CStringLen )
+import           Data.Foldable         ( foldrM )
 import qualified Foreign.C.String      as C
+import           Foreign.C.String      ( CString, CStringLen )
 import qualified Foreign.ForeignPtr    as C
 import           Foreign.ForeignPtr    ( ForeignPtr )
 import qualified Foreign.Marshal.Alloc as C
@@ -66,7 +84,7 @@ allocaBytes size = ContT $ C.allocaBytes size
 --   pointer into a temporary block of memory sufficient to hold @n@ bytes, 
 --   with @a@-byte alignment.
 allocaBytesAligned :: Int -> Int -> ContT r IO (Ptr a)
-allocaBytesAligned size alignment = ContT $ C.allocaBytesAligned size alignment
+allocaBytesAligned size align = ContT $ C.allocaBytesAligned size align
 {-# INLINE allocaBytesAligned #-}
 
 --
@@ -103,16 +121,83 @@ allocaArray = ContT . C.allocaArray
 
 -- | 'allocaArrayWith' @xs@ is a continuation that provides access to a
 --   pointer into a temporary block of memory containing the values of @xs@.
-allocaArrayWith :: (Traversable t, Storable a) => t a -> ContT r IO (Ptr a)
-allocaArrayWith t = do
-    ptr <- allocaArray (length t)
-    liftIO $ foldrM go ptr t
+allocaArrayWith :: (Foldable f, Storable a) => f a -> ContT r IO (Ptr a)
+allocaArrayWith = allocaArrayWith' return
+{-# INLINE allocaArrayWith #-}
+
+-- Why isn't this defined as `allocaArrayWithOf' traversed`? I don't want to
+-- lose the potential performance benefits of a specialized `length`.
+allocaArrayWith' :: (Foldable f, Storable b) 
+                 => (a -> ContT r IO b) 
+                 -> f a -> ContT r IO (Ptr b)
+allocaArrayWith' f xs = do
+    ptr <- allocaArray (length xs)
+    _ <- foldrM go ptr xs
     return ptr
     where
         go x ptr = do
-            poke ptr x
+            x' <- f x
+            liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
-{-# INLINE allocaArrayWith #-}
+{-# INLINE allocaArrayWith' #-}
+
+-- | 'allocaArrayWithOf' @f@ works in the same way as 'allocaArrayWith', but
+--   using the 'Fold' @f@ rather than any 'Foldable' instance.
+allocaArrayWithOf :: (Storable a) => Fold s a -> s -> ContT r IO (Ptr a)
+allocaArrayWithOf fold = allocaArrayWithOf' fold return 
+{-# INLINE allocaArrayWithOf #-}
+
+allocaArrayWithOf' :: (Storable b) 
+                   => Fold s a
+                   -> (a -> ContT r IO b) 
+                   -> s -> ContT r IO (Ptr b)
+allocaArrayWithOf' fold f xs = do
+    ptr <- allocaArray (lengthOf fold xs)
+    _ <- foldrMOf fold go ptr xs
+    return ptr
+    where
+        go x ptr = do
+            x' <- f x
+            liftIO $ poke ptr x'
+            return (C.advancePtr ptr 1)
+{-# INLINE allocaArrayWithOf' #-}
+
+iallocaArrayWith' :: (FoldableWithIndex i f, Storable b)
+                  => (i -> a -> ContT r IO b)
+                  -> f a -> ContT r IO (Ptr b)
+iallocaArrayWith' f xs = do
+    ptr <- allocaArray (length xs)
+    _ <- ifoldrMOf ifolded go ptr xs
+    return ptr
+    where
+        go i x ptr = do
+            x' <- f i x
+            liftIO $ poke ptr x'
+            return (C.advancePtr ptr 1)
+{-# INLINE iallocaArrayWith' #-}
+
+-- | A generic 'IndexedFold' or equivalent, taking an 'IndexedGetter',
+--   'IndexedFold' (obviously), 'IndexedTraversal', or 'IndexedLens'.
+type AnIndexedFold i s a = forall m p. (Indexable i p)
+                        => p a (Const m a) 
+                        -> s -> Const m s
+
+iallocaArrayWithOf' :: (Storable b) 
+                    => AnIndexedFold i s a
+                    -> (i -> a -> ContT r IO b)
+                    -> s -> ContT r IO (Ptr b)
+iallocaArrayWithOf' fold f xs = do
+    ptr <- allocaArray (lengthOf fold xs)
+    _ <- ifoldrMOf fold go ptr xs
+    return ptr
+    where
+        go i x ptr = do
+            x' <- f i x
+            liftIO $ poke ptr x'
+            return (C.advancePtr ptr 1)
+{-# INLINE iallocaArrayWithOf' #-}
+
+--
 
 -- | 'allocaArray0' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of memory sufficient to hold @n@ values of
@@ -121,20 +206,81 @@ allocaArray0 :: Storable a => Int -> ContT r IO (Ptr a)
 allocaArray0 = ContT . C.allocaArray0
 {-# INLINE allocaArray0 #-}
 
--- | 'allocaArrayWith' @xs@ @end@ is a continuation that provides access to a
+-- | 'allocaArrayWith0' @xs@ @end@ is a continuation that provides access to a
 --   pointer into a temporary block of memory containing the values of @xs@,
 --   terminated with @end@.
-allocaArrayWith0 :: (Traversable t, Storable a) => t a -> a -> ContT r IO (Ptr a)
-allocaArrayWith0 t end = do
-    ptr <- allocaArray0 (length t)
-    endPtr <- liftIO $ foldrM go ptr t
+allocaArrayWith0 :: (Foldable f, Storable a) 
+                 => f a -> a -> ContT r IO (Ptr a)
+allocaArrayWith0 = allocaArrayWith0' return
+{-# INLINE allocaArrayWith0 #-}
+
+allocaArrayWith0' :: (Foldable f, Storable b)
+                  => (a -> ContT r IO b)
+                  -> f a -> b -> ContT r IO (Ptr b)
+allocaArrayWith0' f xs end = do
+    ptr <- allocaArray (length xs)
+    endPtr <- foldrMOf folded go ptr xs
     liftIO $ poke endPtr end
     return ptr
     where
         go x ptr = do
-            poke ptr x
+            x' <- f x
+            liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
-{-# INLINE allocaArrayWith0 #-}
+{-# INLINE allocaArrayWith0' #-}
+
+-- | 'allocaArrayWith0Of' @t@ works in the same way as 'allocaArrayWith0', but
+--   using the 'Fold' @t@ rather than any 'Foldable' instance.
+allocaArrayWith0Of :: (Storable a) => Fold s a -> s -> ContT r IO (Ptr a)
+allocaArrayWith0Of fold = allocaArrayWithOf' fold return 
+{-# INLINE allocaArrayWith0Of #-}
+
+allocaArrayWith0Of' :: (Storable b) 
+                    => Fold s a
+                    -> (a -> ContT r IO b) 
+                    -> s -> b -> ContT r IO (Ptr b)
+allocaArrayWith0Of' fold f xs end = do
+    ptr <- allocaArray (lengthOf fold xs)
+    endPtr <- foldrMOf fold go ptr xs
+    liftIO $ poke endPtr end
+    return ptr
+    where
+        go x ptr = do
+            x' <- f x
+            liftIO $ poke ptr x'
+            return (C.advancePtr ptr 1)
+{-# INLINE allocaArrayWith0Of' #-}
+
+iallocaArrayWith0' :: (FoldableWithIndex i f, Storable b)
+                   => (i -> a -> ContT r IO b)
+                   -> f a -> b -> ContT r IO (Ptr b)
+iallocaArrayWith0' f xs end = do
+    ptr <- allocaArray (length xs)
+    endPtr <- ifoldrMOf ifolded go ptr xs
+    liftIO $ poke endPtr end
+    return ptr
+    where
+        go i x ptr = do
+            x' <- f i x
+            liftIO $ poke ptr x'
+            return (C.advancePtr ptr 1)
+{-# INLINE iallocaArrayWith0' #-}
+
+iallocaArrayWith0Of' :: (Storable b)
+                     => AnIndexedFold i s a
+                     -> (i -> a -> ContT r IO b)
+                     -> s -> b -> ContT r IO (Ptr b)
+iallocaArrayWith0Of' fold f xs end = do
+    ptr <- allocaArray (lengthOf fold xs)
+    endPtr <- ifoldrMOf fold go ptr xs
+    liftIO $ poke endPtr end
+    return ptr
+    where
+        go i x ptr = do
+            x' <- f i x
+            liftIO $ poke ptr x'
+            return (C.advancePtr ptr 1)
+{-# INLINE iallocaArrayWith0Of' #-}
 
 --
 
