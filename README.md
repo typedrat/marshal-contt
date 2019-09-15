@@ -17,7 +17,7 @@ allocStringMapWith :: M.Map BS.ByteString BS.ByteString -> (Ptr CString -> IO a)
 allocStringMapWith = iallocaArrayWith0' (\(k, v) -> withCString $ k <> "=" <> v)
 
 spawn :: FilePath -> [FileActions] -> Argv -> Env -> IO ProcessID
-spawn path actions argv env = runContT return $ do
+spawn path actions argv env = flip runContT return $ do
     cPath <- withCString path
     cAction <- withFileActions actions
     cArgv <- allocStringArrayWith argv
@@ -28,7 +28,7 @@ spawn path actions argv env = runContT return $ do
     liftIO $ peek pidPtr
 
 spawnp :: String -> [FileActions] -> Argv -> Env -> IO ProcessID
-spawnp command actions argv env = runContT return $ do
+spawnp command actions argv env = flip runContT return $ do
     cPath <- withCString path
     cAction <- withFileActions actions
     cArgv <- allocStringArrayWith argv
