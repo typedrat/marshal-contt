@@ -8,8 +8,8 @@ Stability   : provisional
 Portability : portable
 
 This library wraps the standard @base@ bracketed allocation primitives (along
-with those from 'Data.ByteString') in a 'ContT'-based interface to ease the
-chaining of complex marshalling operations.
+with those from "Data.ByteString" and "Data.ByteString.Short") in a
+'ContT'-based interface to ease the chaining of complex marshalling operations.
 -}
 module Foreign.Marshal.ContT 
     ( 
@@ -56,6 +56,7 @@ import qualified Foreign.ForeignPtr    as C
 import           Foreign.ForeignPtr    ( ForeignPtr )
 import qualified Foreign.Marshal.Alloc as C
 import qualified Foreign.Marshal.Array as C
+import           Foreign.Marshal.Utils ( fillBytes )
 import           Foreign.Ptr
 import           Foreign.Storable
 
@@ -91,23 +92,22 @@ allocaBytesAligned size align = ContT $ C.allocaBytesAligned size align
 
 -- | 'calloc' is a continuation that provides access to a pointer into a
 --   temporary block of zeroed memory sufficient to hold values of type @a@.
-calloc :: forall r a. Storable a => ContT r IO (Ptr a)
-calloc = ContT $ \f -> do
-    ptr <- C.calloc
-    out <- f ptr
-    C.free ptr
-    return out
+calloc :: forall a r. Storable a => ContT r IO (Ptr a)
+calloc = do
+    ptr <- alloca
+    let size = sizeOf (undefined :: a)
+    liftIO $ fillBytes ptr 0 size
+    return ptr
 {-# INLINE calloc #-}
 
 -- | 'callocBytes' @n@ is a continuation that provides access to a pointer into
 --   a temporary block of zeroed memory sufficient to hold @n@ bytes, with
 --   machine-standard alignment.
 callocBytes :: Int -> ContT r IO (Ptr a)
-callocBytes size = ContT $ \f -> do
-    ptr <- C.callocBytes size
-    out <- f ptr
-    C.free ptr
-    return out
+callocBytes size = do
+    ptr <- allocaBytes size
+    liftIO $ fillBytes ptr 0 size
+    return ptr
 {-# INLINE callocBytes #-}
 
 --
@@ -287,23 +287,23 @@ iallocaArrayWith0Of' fold f xs end = do
 -- | 'callocArray0' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of zeroed memory sufficient to hold @n@
 --   values of type @a@.
-callocArray :: Storable a => Int -> ContT r IO (Ptr a)
-callocArray len = ContT $ \f -> do
-    ptr <- C.callocArray len
-    out <- f ptr
-    C.free ptr
-    return out
+callocArray :: forall a r . Storable a => Int -> ContT r IO (Ptr a)
+callocArray len = do
+    ptr <- allocaArray len
+    let size = sizeOf (undefined :: a)
+    liftIO $ fillBytes ptr 0 (len * size)
+    return ptr
 {-# INLINE callocArray #-}
 
 -- | 'callocArray0' @\@a@ @n@ is a continuation that provides access to a
 --   pointer into a temporary block of zeroed memory sufficient to hold @n@
 --   values of type @a@, along with a final terminal element.
-callocArray0 :: Storable a => Int -> ContT r IO (Ptr a)
-callocArray0 len = ContT $ \f -> do
-    ptr <- C.callocArray0 len
-    out <- f ptr
-    C.free ptr
-    return out
+callocArray0 :: forall a r . Storable a => Int -> ContT r IO (Ptr a)
+callocArray0 len = do
+    ptr <- allocaArray0 len
+    let size = sizeOf (undefined :: a)
+    liftIO $ fillBytes ptr 0 (len * size)
+    return ptr
 {-# INLINE callocArray0 #-}
 
 --
