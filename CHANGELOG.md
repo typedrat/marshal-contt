@@ -1,5 +1,8 @@
 # Revision history for marshal-contt
 
+## 0.3.0.0 -- 2022-02-10
+* Fix bug where allocated arrays are reversed from their Haskell versions.
+
 ## 0.2.0.0 -- 2019-09-15
 
 * Add new `Foreign.Marshal.Codensity` module to expose an equivalent interface

@@ -59,7 +59,7 @@ import           Control.Monad.Codensity
 import           Control.Monad.IO.Class
 import qualified Data.ByteString       as BS
 import qualified Data.ByteString.Short as SBS
-import           Data.Foldable         ( foldrM )
+import           Data.Foldable         ( foldlM )
 import           Data.Functor          ( ($>) )
 import qualified Foreign.C.String      as C
 import           Foreign.C.String      ( CString, CStringLen )
@@ -158,10 +158,10 @@ allocaArrayWith' :: (Foldable f, Storable b)
                  -> f a -> Codensity IO (Ptr b)
 allocaArrayWith' f xs = do
     ptr <- allocaArray (length xs)
-    _ <- foldrM go ptr xs
+    _ <- foldlM go ptr xs
     return ptr
     where
-        go x ptr = do
+        go ptr x = do
             x' <- f x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
@@ -179,10 +179,10 @@ allocaArrayWithOf' :: (Storable b)
                    -> s -> Codensity IO (Ptr b)
 allocaArrayWithOf' fold f xs = do
     ptr <- allocaArray (lengthOf fold xs)
-    _ <- foldrMOf fold go ptr xs
+    _ <- foldlMOf fold go ptr xs
     return ptr
     where
-        go x ptr = do
+        go ptr x = do
             x' <- f x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
@@ -193,10 +193,10 @@ iallocaArrayWith' :: (FoldableWithIndex i f, Storable b)
                   -> f a -> Codensity IO (Ptr b)
 iallocaArrayWith' f xs = do
     ptr <- allocaArray (length xs)
-    _ <- ifoldrMOf ifolded go ptr xs
+    _ <- ifoldlMOf ifolded go ptr xs
     return ptr
     where
-        go i x ptr = do
+        go i ptr x = do
             x' <- f i x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
@@ -215,10 +215,10 @@ iallocaArrayWithOf' :: (Storable b)
                     -> s -> Codensity IO (Ptr b)
 iallocaArrayWithOf' fold f xs = do
     ptr <- allocaArray (lengthOf fold xs)
-    _ <- ifoldrMOf fold go ptr xs
+    _ <- ifoldlMOf fold go ptr xs
     return ptr
     where
-        go i x ptr = do
+        go i ptr x = do
             x' <- f i x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
@@ -246,11 +246,11 @@ allocaArrayWith0' :: (Foldable f, Storable b)
                   -> f a -> b -> Codensity IO (Ptr b)
 allocaArrayWith0' f xs end = do
     ptr <- allocaArray (length xs)
-    endPtr <- foldrMOf folded go ptr xs
+    endPtr <- foldlMOf folded go ptr xs
     liftIO $ poke endPtr end
     return ptr
     where
-        go x ptr = do
+        go ptr x = do
             x' <- f x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
@@ -268,11 +268,11 @@ allocaArrayWith0Of' :: (Storable b)
                     -> s -> b -> Codensity IO (Ptr b)
 allocaArrayWith0Of' fold f xs end = do
     ptr <- allocaArray (lengthOf fold xs)
-    endPtr <- foldrMOf fold go ptr xs
+    endPtr <- foldlMOf fold go ptr xs
     liftIO $ poke endPtr end
     return ptr
     where
-        go x ptr = do
+        go ptr x = do
             x' <- f x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
@@ -283,11 +283,11 @@ iallocaArrayWith0' :: (FoldableWithIndex i f, Storable b)
                    -> f a -> b -> Codensity IO (Ptr b)
 iallocaArrayWith0' f xs end = do
     ptr <- allocaArray (length xs)
-    endPtr <- ifoldrMOf ifolded go ptr xs
+    endPtr <- ifoldlMOf ifolded go ptr xs
     liftIO $ poke endPtr end
     return ptr
     where
-        go i x ptr = do
+        go i ptr x = do
             x' <- f i x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
@@ -299,11 +299,11 @@ iallocaArrayWith0Of' :: (Storable b)
                      -> s -> b -> Codensity IO (Ptr b)
 iallocaArrayWith0Of' fold f xs end = do
     ptr <- allocaArray (lengthOf fold xs)
-    endPtr <- ifoldrMOf fold go ptr xs
+    endPtr <- ifoldlMOf fold go ptr xs
     liftIO $ poke endPtr end
     return ptr
     where
-        go i x ptr = do
+        go i ptr x = do
             x' <- f i x
             liftIO $ poke ptr x'
             return (C.advancePtr ptr 1)
